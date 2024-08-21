@@ -21,7 +21,7 @@ public class UserService {
     @Transactional
     public void signup(UserDTO userDTO) {
         if (userRepository.findByUserId(userDTO.getUserId()).isPresent()) {
-            throw new RuntimeException("User ID already exists");
+            throw new RuntimeException("# 이미 사용 중인 아이디");
         }
 
         User user = User.builder()

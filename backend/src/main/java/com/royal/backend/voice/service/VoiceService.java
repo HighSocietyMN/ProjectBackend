@@ -6,80 +6,104 @@ import com.royal.backend.voice.entity.Voice;
 import com.royal.backend.voice.repository.VoiceRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.ResourceUtils;
+import org.springframework.web.client.RestTemplate;
 
+import javax.sound.sampled.AudioFileFormat;
+import javax.sound.sampled.AudioFormat;
+import javax.sound.sampled.AudioInputStream;
+import javax.sound.sampled.AudioSystem;
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Base64;
-import java.util.List;
 
 @Slf4j
 @Service
 public class VoiceService {
     private final VoiceRepository voiceRepository;
+    private final RestTemplate restTemplate;
 
     @Value("${ai.server.url}")
-    private List<String> aiServerUrl;
+    private String aiServerUrl;
 
-    public VoiceService(VoiceRepository voiceRepository) {
+    public VoiceService(VoiceRepository voiceRepository, RestTemplate restTemplate) {
         this.voiceRepository = voiceRepository;
-    }
-
-    private double calculateSimilarity(byte[] data1, byte[] data2) {
-        int minLength = Math.min(data1.length, data2.length);
-        int matchingBytes = 0;
-
-        for (int i = 0; i < minLength; i++) {
-            if (data1[i] == data2[i]) {
-                matchingBytes++;
-            }
-        }
-
-        return (double) matchingBytes / minLength;
+        this.restTemplate = restTemplate;
     }
 
     @Transactional
-    public VoiceResponseDTO processVoice(VoiceRequestDTO voiceRequestDTO) {
-        log.info("Processing voice for character: {}", voiceRequestDTO.getCharacterName());
+    public VoiceResponseDTO processVoice(VoiceRequestDTO request) {
+        log.info("Processing voice for character: {}", request.getCharacterName());
 
-        List<Voice> similarVoices = voiceRepository.findByCharacterName(voiceRequestDTO.getCharacterName());
-        for (Voice voice : similarVoices) {
-            if (calculateSimilarity(voice.getCharacterVoiceData(), voiceRequestDTO.getCharacterVoiceData()) >= 0.8) {
-                log.info("Found similar voice in database");
-                return convertToResponseDTO(voice);
-            }
+        // AI 서버에 요청
+        VoiceResponseDTO aiResponse = sendRequestToAIServer(request);
+
+        // 디버깅: characterVoiceData 출력
+        log.debug("Received characterVoiceData: {}", aiResponse.getCharacterVoiceData());
+
+        // WAV 파일 저장
+        String wavFilePath = saveAsWavFile(aiResponse.getCharacterVoiceData(), request.getCharacterName());
+        log.info("Saved WAV file at: {}", wavFilePath);
+
+        // 데이터베이스에 저장
+        Voice voice = Voice.builder()
+                .characterName(aiResponse.getCharacterName())
+                .characterText(aiResponse.getCharacterText())
+                .characterVoiceData(aiResponse.getCharacterVoiceData())
+                .build();
+        voiceRepository.save(voice);
+
+        return aiResponse;
+    }
+
+    private VoiceResponseDTO sendRequestToAIServer(VoiceRequestDTO request) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        HttpEntity<VoiceRequestDTO> entity = new HttpEntity<>(request, headers);
+
+        ResponseEntity<VoiceResponseDTO> response = restTemplate.postForEntity(
+                aiServerUrl + "/api/v1/voices/process", entity, VoiceResponseDTO.class);
+
+        if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
+            return response.getBody();
+        } else {
+            throw new RuntimeException("AI server failed to process the request");
         }
-
-        log.info("No similar voice found in database, performing AI processing");
-        VoiceResponseDTO responseDTO = processWithAI(voiceRequestDTO);
-
-        // 처리된 결과를 데이터베이스에 저장
-        Voice newVoice = Voice.builder()
-                .characterName(voiceRequestDTO.getCharacterName())
-                .characterVoiceData(voiceRequestDTO.getCharacterVoiceData())
-                .characterMessage(responseDTO.getCharacterMessage())
-                .characterResultVoiceData(Base64.getDecoder().decode(responseDTO.getCharacterResultVoiceData()))
-                .build();
-        voiceRepository.save(newVoice);
-
-        return responseDTO;
     }
 
-    private VoiceResponseDTO convertToResponseDTO(Voice voice) {
-        return VoiceResponseDTO.builder()
-                .characterMessage(voice.getCharacterMessage())
-                .characterResultVoiceData(Base64.getEncoder().encodeToString(voice.getCharacterResultVoiceData()))
-                .build();
-    }
+    private String saveAsWavFile(String base64Audio, String characterName) {
+        try {
+            byte[] audioData = Base64.getDecoder().decode(base64Audio);
+            AudioFormat format = new AudioFormat(44100, 16, 1, true, false);
+            AudioInputStream ais = new AudioInputStream(
+                    new ByteArrayInputStream(audioData),
+                    format,
+                    audioData.length / format.getFrameSize()
+            );
 
-    private VoiceResponseDTO processWithAI(VoiceRequestDTO voiceRequestDTO) {
-        // 여기서 실제 AI 처리를 수행해야 합니다.
-        // 이 예제에서는 간단한 더미 응답을 생성합니다.
-        String dummyMessage = "안녕하세요. " + voiceRequestDTO.getCharacterName() + "입니다.";
-        String dummyResultVoiceData = Base64.getEncoder().encodeToString(("Processed voice data for " + voiceRequestDTO.getCharacterName()).getBytes());
+            // 프로젝트 루트 디렉토리 찾기
+            File projectRoot = new File(ResourceUtils.getURL("classpath:").getPath()).getParentFile().getParentFile();
 
-        return VoiceResponseDTO.builder()
-                .characterMessage(dummyMessage)
-                .characterResultVoiceData(dummyResultVoiceData)
-                .build();
+            // WAV 파일 저장 경로 설정
+            Path storagePath = Paths.get(projectRoot.getAbsolutePath(), "src", "main", "resources", "static", "wav");
+            Files.createDirectories(storagePath);
+
+            String fileName = characterName + "_" + System.currentTimeMillis() + ".wav";
+            Path filePath = storagePath.resolve(fileName);
+
+            AudioSystem.write(ais, AudioFileFormat.Type.WAVE, filePath.toFile());
+
+            log.info("WAV file saved at: {}", filePath);
+            return "/static/wav/" + fileName;  // 웹 애플리케이션에서 접근 가능한 상대 경로 반환
+        } catch (Exception e) {
+            log.error("Failed to save WAV file", e);
+            throw new RuntimeException("Failed to save WAV file", e);
+        }
     }
 }

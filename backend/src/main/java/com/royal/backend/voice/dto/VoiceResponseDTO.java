@@ -2,12 +2,10 @@ package com.royal.backend.voice.dto;
 
 import lombok.*;
 
-@Getter
-@Setter
-@NoArgsConstructor
-@AllArgsConstructor
+@Data
 @Builder
 public class VoiceResponseDTO {
-    private String characterMessage;
-    private String characterResultVoiceData;
+    private String characterName;
+    private String characterText;
+    private String characterVoiceData;
 }

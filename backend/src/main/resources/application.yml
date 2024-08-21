@@ -1,0 +1,45 @@
+resilience4j:
+  circuitbreaker:
+    instances:
+      aiService:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+        waitDurationInOpenState: 5s
+        failureRateThreshold: 50
+        eventConsumerBufferSize: 10
+
+ai:
+  server:
+    url: http://192.168.1.55:7777
+
+spring:
+  datasource:
+    hikari:
+      maximum-pool-size: 10
+    url: jdbc:mysql://localhost:3306/midnight?serverTimezone=UTC&rewriteBatchedStatements=true
+    username: root
+    password: root
+  jpa:
+    hibernate:
+      ddl-auto: create
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQL8Dialect
+        batch_versioned_data: true
+        order_updates: true
+        jdbc:
+          batch_size: 30
+        format_sql: true
+    show-sql: true
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+
+logging:
+  level:
+    org.springframework.web: DEBUG
+    com.royal.backend: DEBUG

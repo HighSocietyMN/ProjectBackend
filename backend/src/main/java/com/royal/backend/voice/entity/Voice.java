@@ -17,15 +17,10 @@ public class Voice {
 
     private String characterName; // 캐릭터 이름
 
-    @Lob
     @Column(columnDefinition = "TEXT")
-    private String characterMessage;
+    private String characterText; // 캐릭터 대사
 
     @Lob
-    @Column(columnDefinition = "LONGBLOB")
-    private byte[] characterVoiceData; // 캐릭터 목소리 byte
-
-    @Lob
-    @Column(columnDefinition = "LONGBLOB")
-    private byte[] characterResultVoiceData;
+    @Column(columnDefinition = "LONGTEXT")
+    private String characterVoiceData; // 캐릭터 목소리
 }
